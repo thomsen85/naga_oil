@@ -4,7 +4,8 @@ error: failed to build a valid final module: Function [1] 'func' is invalid
 7 │ ╭ fn func() -> f32 {
 8 │ │     return 1u;
   │ │            ^^ naga::ir::Expression [0]
-  │ ╰──────────────^ naga::ir::Function [1]
+9 │ │ }
+  │ ╰─^ naga::ir::Function [1]
   │  
   = The `return` expression Some([0]) does not match the declared return type Some([0])
 

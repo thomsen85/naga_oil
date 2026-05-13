@@ -131,7 +131,6 @@ impl<'a> DerivedModule<'a> {
                     | TypeInner::Atomic { .. }
                     | TypeInner::AccelerationStructure { .. }
                     | TypeInner::RayQuery { .. } => ty.inner.clone(),
-
                     TypeInner::Pointer { base, space } => TypeInner::Pointer {
                         base: self.import_type(base),
                         space: *space,
@@ -159,6 +158,17 @@ impl<'a> DerivedModule<'a> {
                     TypeInner::BindingArray { base, size } => TypeInner::BindingArray {
                         base: self.import_type(base),
                         size: *size,
+                    },
+                    TypeInner::CooperativeMatrix {
+                        columns,
+                        rows,
+                        scalar,
+                        role,
+                    } => TypeInner::CooperativeMatrix {
+                        columns: *columns,
+                        rows: *rows,
+                        scalar: *scalar,
+                        role: *role,
                     },
                 },
             };
@@ -212,6 +222,7 @@ impl<'a> DerivedModule<'a> {
                 binding: gv.binding,
                 ty: self.import_type(&gv.ty),
                 init: gv.init.map(|c| self.import_global_expression(c)),
+                memory_decorations: gv.memory_decorations,
             };
 
             let span = self
@@ -319,7 +330,6 @@ impl<'a> DerivedModule<'a> {
             .iter()
             .map(|stmt| {
                 match stmt {
-                    // remap function calls
                     Statement::Call {
                         function,
                         arguments,
@@ -329,8 +339,6 @@ impl<'a> DerivedModule<'a> {
                         arguments: arguments.iter().map(|expr| map_expr!(expr)).collect(),
                         result: result.as_ref().map(|result| map_expr!(result)),
                     },
-
-                    // recursively
                     Statement::Block(b) => Statement::Block(map_block!(b)),
                     Statement::If {
                         condition,
@@ -361,8 +369,6 @@ impl<'a> DerivedModule<'a> {
                         continuing: map_block!(continuing),
                         break_if: map_expr_opt!(break_if),
                     },
-
-                    // map expressions
                     Statement::Emit(exprs) => {
                         // iterate once to add expressions that should NOT be part of the emit statement
                         for expr in exprs.clone() {
@@ -513,12 +519,18 @@ impl<'a> DerivedModule<'a> {
                             value: map_expr!(value),
                         }
                     }
-                    // else just copy
                     Statement::Break
                     | Statement::Continue
                     | Statement::Kill
                     | Statement::MemoryBarrier(_)
                     | Statement::ControlBarrier(_) => stmt.clone(),
+                    Statement::RayPipelineFunction(ray_pipeline_function) => {
+                        Statement::RayPipelineFunction(*ray_pipeline_function)
+                    }
+                    Statement::CooperativeStore { target, data } => Statement::CooperativeStore {
+                        target: map_expr!(target),
+                        data: *data,
+                    },
                 }
             })
             .collect();
@@ -722,12 +734,10 @@ impl<'a> DerivedModule<'a> {
                 convert: *convert,
             },
             Expression::ArrayLength(expr) => Expression::ArrayLength(map_expr!(expr)),
-
             Expression::LocalVariable(_) | Expression::FunctionArgument(_) => {
                 is_external = true;
                 expr.clone()
             }
-
             Expression::AtomicResult { ty, comparison } => Expression::AtomicResult {
                 ty: self.import_type(ty),
                 comparison: *comparison,
@@ -757,6 +767,22 @@ impl<'a> DerivedModule<'a> {
             Expression::SubgroupBallotResult => expr.clone(),
             Expression::SubgroupOperationResult { ty } => Expression::SubgroupOperationResult {
                 ty: self.import_type(ty),
+            },
+            Expression::CooperativeLoad {
+                columns,
+                rows,
+                role,
+                data,
+            } => Expression::CooperativeLoad {
+                columns: *columns,
+                rows: *rows,
+                role: *role,
+                data: *data,
+            },
+            Expression::CooperativeMultiplyAdd { a, b, c } => Expression::CooperativeMultiplyAdd {
+                a: map_expr!(a),
+                b: map_expr!(b),
+                c: map_expr!(c),
             },
         };
 
@@ -910,6 +936,7 @@ impl<'a> DerivedModule<'a> {
                 workgroup_size_overrides: ep.workgroup_size_overrides,
                 mesh_info: ep.mesh_info.clone(),
                 task_payload: ep.task_payload,
+                incoming_ray_payload: ep.incoming_ray_payload,
             })
             .collect();
 
